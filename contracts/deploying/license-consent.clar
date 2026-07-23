@@ -191,7 +191,6 @@
     (license-name (string-ascii 64))
   )
   (let ((proposal-id (+ (default-to u0 (map-get? proposal-count nft-contract)) u1)))
-    (asserts! (is-some (map-get? artists nft-contract)) ERR_NO_ARTIST)
     (asserts! (is-eq (len license-hash) u32) ERR_BAD_HASH)
     (map-set proposal-count nft-contract proposal-id)
     (map-set proposals {

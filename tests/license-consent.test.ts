@@ -391,9 +391,9 @@ describe("sync-artist-from-collection", function () {
 });
 
 describe("propose-license", function () {
-  it("rejects proposals for an unregistered collection", function () {
+  it("allows proposing before an artist is registered (requester-first)", function () {
     const { result } = proposeLicense();
-    expect(result).toBeErr(Cl.uint(101));
+    expect(result).toBeOk(Cl.uint(1));
   });
 
   it("anyone can propose once an artist is registered; ids increment", function () {
