@@ -75,14 +75,14 @@ describe("set-artist", function () {
     expect(json.value.value["evidence-uri"].value).toBe(EVIDENCE);
   });
 
-  it("rejects non-owner", function () {
+  it("rejects a caller who is neither owner nor manager", function () {
     const { result } = simnet.callPublicFn(
       C,
       "set-artist",
       [nftContract, Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
       requester
     );
-    expect(result).toBeErr(Cl.uint(100));
+    expect(result).toBeErr(Cl.uint(111));
   });
 
   it("rejects a standard principal as the nft collection", function () {
@@ -107,6 +107,100 @@ describe("set-artist", function () {
 
     const stored = simnet.callReadOnlyFn(C, "get-artist", [nftContract], deployer);
     expect(cvToJSON(stored.result).value.value.artist.value).toBe(`${deployer}.mock-artist-safe`);
+  });
+});
+
+describe("collection-manager delegation", function () {
+  const manager = requester; // OWNER delegates set-artist to this principal
+
+  function delegate(sender: string = deployer) {
+    return simnet.callPublicFn(
+      C,
+      "set-collection-manager",
+      [nftContract, Cl.principal(manager)],
+      sender
+    );
+  }
+
+  it("only owner can set a collection manager", function () {
+    expect(delegate(newArtist).result).toBeErr(Cl.uint(100));
+    expect(delegate().result).toBeOk(Cl.bool(true));
+
+    const stored = simnet.callReadOnlyFn(C, "get-collection-manager", [nftContract], deployer);
+    expect(cvToJSON(stored.result).value.value).toBe(manager);
+  });
+
+  it("the delegated manager registers ITSELF as artist", function () {
+    delegate();
+    const { result } = simnet.callPublicFn(
+      C,
+      "set-artist",
+      [nftContract, Cl.principal(manager), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      manager
+    );
+    expect(result).toBeOk(Cl.bool(true));
+    const stored = simnet.callReadOnlyFn(C, "get-artist", [nftContract], deployer);
+    expect(cvToJSON(stored.result).value.value.artist.value).toBe(manager);
+  });
+
+  it("a manager cannot register someone else as the artist", function () {
+    delegate();
+    const { result } = simnet.callPublicFn(
+      C,
+      "set-artist",
+      [nftContract, Cl.principal(newArtist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      manager
+    );
+    expect(result).toBeErr(Cl.uint(111));
+  });
+
+  it("OWNER may still register any artist", function () {
+    const { result } = simnet.callPublicFn(
+      C,
+      "set-artist",
+      [nftContract, Cl.principal(newArtist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      deployer
+    );
+    expect(result).toBeOk(Cl.bool(true));
+    const stored = simnet.callReadOnlyFn(C, "get-artist", [nftContract], deployer);
+    expect(cvToJSON(stored.result).value.value.artist.value).toBe(newArtist);
+  });
+
+  it("a manager for one collection cannot set-artist for another", function () {
+    delegate(); // manager delegated for `nftContract` only
+    const otherCollection = Cl.contractPrincipal(deployer, "mock-gamma-collection");
+    const { result } = simnet.callPublicFn(
+      C,
+      "set-artist",
+      [otherCollection, Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      manager
+    );
+    expect(result).toBeErr(Cl.uint(111));
+  });
+
+  it("owner can revoke a manager", function () {
+    delegate();
+    expect(
+      simnet.callPublicFn(C, "remove-collection-manager", [nftContract], deployer).result
+    ).toBeOk(Cl.bool(true));
+
+    const { result } = simnet.callPublicFn(
+      C,
+      "set-artist",
+      [nftContract, Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      manager
+    );
+    expect(result).toBeErr(Cl.uint(111));
+  });
+
+  it("owner can still set-artist directly", function () {
+    const { result } = simnet.callPublicFn(
+      C,
+      "set-artist",
+      [nftContract, Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      deployer
+    );
+    expect(result).toBeOk(Cl.bool(true));
   });
 });
 

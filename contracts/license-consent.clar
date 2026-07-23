@@ -40,6 +40,7 @@
 (define-constant ERR_NOT_PENDING (err u108))
 (define-constant ERR_HASH_MISMATCH (err u109))
 (define-constant ERR_LOCKED (err u110))
+(define-constant ERR_NOT_AUTHORIZED (err u111))
 
 ;; Gamma-template collections expose the artist wallet on-chain
 (define-trait artist-source (
@@ -57,6 +58,11 @@
     locked: bool,
   }
 )
+
+;; nft collection contract -> principal OWNER has delegated to run set-artist
+;; for that collection (curates the tweet-evidence path without full owner
+;; rights). OWNER can always set-artist directly too.
+(define-map collection-managers principal principal)
 
 ;; license documents proposed for signature, per collection
 (define-map proposals
@@ -99,9 +105,40 @@
   )
 )
 
-;; Admin registers (or rotates) the verified artist wallet for a collection.
+;; OWNER delegates the tweet-evidence path for one collection to a manager
+;; principal. That manager can then call set-artist for that collection only.
+(define-public (set-collection-manager
+    (nft-contract principal)
+    (manager principal)
+  )
+  (begin
+    (asserts! (is-eq contract-caller OWNER) ERR_NOT_OWNER)
+    (map-set collection-managers nft-contract manager)
+    (print { a: "set-collection-manager", nft-contract: nft-contract, manager: manager })
+    (ok true)
+  )
+)
+
+(define-public (remove-collection-manager (nft-contract principal))
+  (begin
+    (asserts! (is-eq contract-caller OWNER) ERR_NOT_OWNER)
+    (map-delete collection-managers nft-contract)
+    (print { a: "remove-collection-manager", nft-contract: nft-contract })
+    (ok true)
+  )
+)
+
+(define-private (is-manager-of (nft-contract principal) (who principal))
+  (is-eq (some who) (map-get? collection-managers nft-contract))
+)
+
+;; Registers (or rotates) the verified artist wallet for a collection.
 ;; evidence-uri points at the public wallet<->identity proof (e.g. tweet URL).
-;; lock: true prevents sync-artist-from-collection from overwriting this.
+;; lock: true prevents a later sync/claim from overwriting this.
+;; OWNER may register any artist. A delegated manager (a wallet the backend
+;; designated after an X<->wallet link) may only register ITSELF as the
+;; artist - the designation IS "this wallet is the artist", so the consent
+;; tx is signed by that same wallet.
 (define-public (set-artist
     (nft-contract principal)
     (artist principal)
@@ -110,7 +147,13 @@
     (lock bool)
   )
   (begin
-    (asserts! (is-eq contract-caller OWNER) ERR_NOT_OWNER)
+    (asserts!
+      (or
+        (is-eq contract-caller OWNER)
+        (and (is-manager-of nft-contract contract-caller) (is-eq artist contract-caller))
+      )
+      ERR_NOT_AUTHORIZED
+    )
     (asserts! (is-contract-principal nft-contract) ERR_NOT_NFT_CONTRACT)
     (map-set artists nft-contract {
       artist: artist,
@@ -306,6 +349,10 @@
 
 (define-read-only (get-artist (nft-contract principal))
   (map-get? artists nft-contract)
+)
+
+(define-read-only (get-collection-manager (nft-contract principal))
+  (map-get? collection-managers nft-contract)
 )
 
 (define-read-only (get-proposal-count (nft-contract principal))
