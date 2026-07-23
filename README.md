@@ -110,10 +110,24 @@ license fields at all.
 ```
 clarinet check
 npm install
-npm test
+npm test              # 35 unit tests (clarinet-sdk / vitest)
+npm run verify:mainnet  # stxer mainnet-fork against the REAL bitcoin-pepe
 ```
 
 Clarity 5, tested with @stacks/clarinet-sdk (vitest). 35 tests.
+
+### Mainnet-fork verification
+
+`npm run verify:mainnet` deploys the contract on a Stacks mainnet fork (stxer)
+and drives the full lifecycle against the **real** `bitcoin-pepe` collection -
+the real on-chain artist wallet signs the SHA-256 of an actual license PDF.
+This proves what the mocked unit tests cannot: the `<artist-source>` trait
+dispatches against the real collection (whose `get-artist-address` returns
+`(response principal none)` vs the trait's `(response principal uint)`), and
+`is-current-license` verifies exact document bytes on-chain.
+
+**37 / 37 passed** - see [simulations/RESULTS-mainnet.md](simulations/RESULTS-mainnet.md)
+and the run: https://stxer.xyz/simulations/mainnet/861a3608c0d136f6650b339d043f1245
 
 ## Example
 

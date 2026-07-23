@@ -5,12 +5,16 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:mainnet": "node simulations/verify-mainnet.mjs"
   },
   "dependencies": {
     "@stacks/clarinet-sdk": "^3.21.0",
     "@stacks/transactions": "^7.2.0",
     "vitest": "^2.1.9",
     "vitest-environment-clarinet": "^3.0.0"
+  },
+  "devDependencies": {
+    "stxer": "^0.8.0"
   }
 }
