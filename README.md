@@ -15,30 +15,39 @@ Two roles, DocuSign style:
 
 ## How it works
 
-1. **Identify the artist wallet.** Two paths:
-   - **Trustless (Gamma-style collections).** The collection contract
-     already names the artist on-chain (`get-artist-address`, the wallet
-     receiving mint + royalty payouts). Anyone calls
-     `sync-artist-from-collection` and the registry mirrors it. Example:
-     `bitcoin-pepe` exposes `artist-address` this way.
-   - **Curated (everything else).** The artist posts their Stacks address
-     from their known identity, e.g. a tweet from `@their_handle`. No
-     doxxing needed - pseudonymous handle + wallet is the identity. The
-     registry owner calls `set-artist(nft-contract, artist, x-handle,
-     evidence-uri, lock)` after checking the evidence; the tweet URL is
-     stored on-chain. `lock: true` protects the curated entry from being
-     overwritten by a later sync (useful when the collection's on-chain
-     artist-address is stale or lost).
+1. **Identify the artist wallet.** Three paths, matched to what the
+   collection exposes on-chain:
+   - **Trustless sync (collections that name their artist on-chain).** The
+     collection already exposes `get-artist-address` (the wallet receiving
+     mint + royalty payouts). Anyone calls `sync-artist-from-collection`
+     and the registry mirrors it (bare, no handle). Example: `bitcoin-pepe`.
+   - **Self-claim (same collections, richer).** The artist the collection
+     names calls `claim-artist(collection, x-handle, evidence-uri)`
+     themselves - no admin - proving control by being the caller that
+     matches `get-artist-address`, and attaching their own handle +
+     evidence.
+   - **Admin-curated (collections with NO on-chain artist reference).**
+     Nothing on-chain says who the artist is, so the registry owner vouches:
+     the artist posts their Stacks address from their known identity (e.g. a
+     tweet from `@their_handle` - pseudonymous, no doxxing), and the owner
+     calls `set-artist(nft-contract, artist, x-handle, evidence-uri, lock)`
+     after checking it. `lock: true` protects the curated entry from being
+     overwritten by a later sync/claim.
+
+   The artist wallet may be an **EOA or a contract** (a smart wallet / safe).
+   Signing is gated on `contract-caller == artist`, so a safe signs by being
+   the immediate caller; a plain wallet signs with a direct tx.
 2. **Propose the license (on-chain, requester).** The requester calls
    `propose-license(nft-contract, license-hash, license-uri, license-name)`.
    `license-hash` is the sha256 of the exact license document bytes.
 3. **Sign (on-chain, artist).** The artist calls
-   `sign-license(nft-contract, proposal-id, license-hash)` directly from
-   their wallet - their client re-hashes the document, so the provided hash
-   must match the proposal. The transaction itself IS the signature: the
-   artist's key signs the payload containing the document hash. Each
-   signature becomes an immutable new license version. The artist can also
-   `reject-proposal`.
+   `sign-license(nft-contract, proposal-id, license-hash)` from their wallet
+   - their client re-hashes the document, so the provided hash must match the
+   proposal. The transaction itself IS the signature: the artist's key
+   authorizes a payload containing the document hash. Each signature becomes
+   an immutable new license version. The artist can also `reject-proposal`.
+   The signer may be an EOA or a contract (smart wallet / safe); the gate is
+   `contract-caller == artist`.
 4. **Verify (anyone, especially the requester).** Hash the document you
    hold and call `is-current-license(nft-contract, hash)` - true means the
    registered artist signed exactly this document and it is the latest
@@ -53,10 +62,11 @@ via `evidence-uri`).
 
 Public:
 
-- `set-artist(nft-contract principal, artist principal, x-handle (string-ascii 64), evidence-uri (string-ascii 256), lock bool)` - owner only; registers or rotates the verified artist wallet for a collection. Rejects non-contract collections and contract-principal artists. `lock: true` blocks sync overwrites.
-- `sync-artist-from-collection(collection <artist-source>)` - permissionless; registers the wallet the collection itself reports via `get-artist-address` (Gamma template). Fails on admin-locked registrations (u110).
+- `set-artist(nft-contract principal, artist principal, x-handle (string-ascii 64), evidence-uri (string-ascii 256), lock bool)` - owner only; registers or rotates the artist for a collection that has no on-chain artist reference. Rejects non-contract collections. Artist may be an EOA or a contract. `lock: true` blocks sync/claim overwrites.
+- `sync-artist-from-collection(collection <artist-source>)` - permissionless; mirrors the wallet the collection reports via `get-artist-address`. Fails on admin-locked registrations (u110).
+- `claim-artist(collection <artist-source>, x-handle (string-ascii 64), evidence-uri (string-ascii 256))` - the on-chain artist self-registers (caller must equal `get-artist-address`), attaching handle + evidence. No admin. Fails on admin-locked registrations (u110).
 - `propose-license(nft-contract principal, license-hash (buff 32), license-uri (string-ascii 256), license-name (string-ascii 64))` - permissionless (only what the artist signs carries weight); requires a registered artist. Returns the proposal id.
-- `sign-license(nft-contract principal, proposal-id uint, license-hash (buff 32))` - artist only, direct call only (tx-sender must equal contract-caller), hash must match the proposal. Returns the new version number.
+- `sign-license(nft-contract principal, proposal-id uint, license-hash (buff 32))` - gated on `contract-caller == artist` (EOA or contract), hash must match the proposal. Returns the new version number.
 - `reject-proposal(nft-contract principal, proposal-id uint)` - artist only; closes a pending proposal.
 
 Read-only:
@@ -69,9 +79,10 @@ Read-only:
 - `is-current-license(nft-contract, document-hash)` - true if the hash matches the latest signed license
 
 Errors: u100 not-owner, u101 no-artist-registered, u102 not-the-artist,
-u103 collection-not-a-contract, u104 artist-not-a-standard-principal,
-u105 not-a-direct-call, u106 bad-hash-length, u107 no-such-proposal,
+u103 collection-not-a-contract, u106 bad-hash-length, u107 no-such-proposal,
 u108 proposal-not-pending, u109 hash-mismatch, u110 registration-locked.
+(u104/u105 retired: the artist may be a contract, so a standard-principal
+and direct-EOA-call requirement no longer apply.)
 
 ## Note on Gamma collections
 
@@ -92,7 +103,7 @@ npm install
 npm test
 ```
 
-Clarity 5, tested with @stacks/clarinet-sdk (vitest). 22 tests.
+Clarity 5, tested with @stacks/clarinet-sdk (vitest). 28 tests.
 
 ## Example
 

@@ -30,8 +30,11 @@
 (define-constant ERR_NO_ARTIST (err u101))
 (define-constant ERR_NOT_ARTIST (err u102))
 (define-constant ERR_NOT_NFT_CONTRACT (err u103))
-(define-constant ERR_ARTIST_NOT_STANDARD (err u104))
-(define-constant ERR_NOT_DIRECT_CALL (err u105))
+;; u104 / u105 retired: the artist may be a contract (a smart wallet / safe),
+;; so we no longer require a standard principal or a direct EOA call. The sign
+;; gate is contract-caller == artist, which covers both an EOA artist (direct
+;; tx) and a contract artist (the safe is the immediate caller), while still
+;; blocking a middle contract from proxying an EOA artist.
 (define-constant ERR_BAD_HASH (err u106))
 (define-constant ERR_NO_PROPOSAL (err u107))
 (define-constant ERR_NOT_PENDING (err u108))
@@ -109,7 +112,6 @@
   (begin
     (asserts! (is-eq contract-caller OWNER) ERR_NOT_OWNER)
     (asserts! (is-contract-principal nft-contract) ERR_NOT_NFT_CONTRACT)
-    (asserts! (not (is-contract-principal artist)) ERR_ARTIST_NOT_STANDARD)
     (map-set artists nft-contract {
       artist: artist,
       x-handle: x-handle,
@@ -141,7 +143,6 @@
     (asserts! (not (default-to false (get locked (map-get? artists nft-contract))))
       ERR_LOCKED
     )
-    (asserts! (not (is-contract-principal artist)) ERR_ARTIST_NOT_STANDARD)
     (map-set artists nft-contract {
       artist: artist,
       x-handle: "",
@@ -155,6 +156,42 @@
       artist: artist,
     })
     (ok artist)
+  )
+)
+
+;; Self-service registration: the artist the collection itself names on-chain
+;; (get-artist-address) registers themselves, with their own handle + evidence,
+;; no admin needed. Caller must match the on-chain artist (contract-caller ==
+;; get-artist-address), so an EOA artist calls directly and a contract artist
+;; (smart wallet / safe) forwards. Cannot overwrite an admin-locked entry.
+(define-public (claim-artist
+    (collection <artist-source>)
+    (x-handle (string-ascii 64))
+    (evidence-uri (string-ascii 256))
+  )
+  (let (
+      (nft-contract (contract-of collection))
+      (onchain-artist (try! (contract-call? collection get-artist-address)))
+    )
+    (asserts! (is-eq contract-caller onchain-artist) ERR_NOT_ARTIST)
+    (asserts! (not (default-to false (get locked (map-get? artists nft-contract))))
+      ERR_LOCKED
+    )
+    (map-set artists nft-contract {
+      artist: onchain-artist,
+      x-handle: x-handle,
+      evidence-uri: evidence-uri,
+      set-at: stacks-block-height,
+      locked: false,
+    })
+    (print {
+      a: "claim-artist",
+      nft-contract: nft-contract,
+      artist: onchain-artist,
+      x-handle: x-handle,
+      evidence-uri: evidence-uri,
+    })
+    (ok onchain-artist)
   )
 )
 
@@ -197,7 +234,10 @@
 
 ;; The verified artist signs a pending proposal, re-asserting the document
 ;; hash (their client re-hashes the doc, so consent binds to exact bytes).
-;; Must be called directly from the artist wallet (no contract in between).
+;; Gated on contract-caller == artist: for an EOA artist that means a direct
+;; tx (a wrapping contract would be contract-caller and get rejected); for a
+;; contract artist (smart wallet / safe) the wallet itself is the immediate
+;; caller. signed-by records that principal.
 (define-public (sign-license
     (nft-contract principal)
     (proposal-id uint)
@@ -209,8 +249,7 @@
       (proposal (unwrap! (map-get? proposals key) ERR_NO_PROPOSAL))
       (version (+ (default-to u0 (map-get? license-count nft-contract)) u1))
     )
-    (asserts! (is-eq tx-sender contract-caller) ERR_NOT_DIRECT_CALL)
-    (asserts! (is-eq tx-sender (get artist registration)) ERR_NOT_ARTIST)
+    (asserts! (is-eq contract-caller (get artist registration)) ERR_NOT_ARTIST)
     (asserts! (is-eq (get status proposal) STATUS_PENDING) ERR_NOT_PENDING)
     (asserts! (is-eq license-hash (get license-hash proposal)) ERR_HASH_MISMATCH)
     (map-set proposals key (merge proposal { status: STATUS_SIGNED }))
@@ -224,7 +263,7 @@
       license-name: (get license-name proposal),
       proposal-id: proposal-id,
       proposed-by: (get proposed-by proposal),
-      signed-by: tx-sender,
+      signed-by: contract-caller,
       signed-at-stacks: stacks-block-height,
       signed-at-burn: burn-block-height,
     })
@@ -236,7 +275,7 @@
       license-hash: (get license-hash proposal),
       license-uri: (get license-uri proposal),
       license-name: (get license-name proposal),
-      artist: tx-sender,
+      artist: contract-caller,
     })
     (ok version)
   )
@@ -252,15 +291,14 @@
       (key { nft-contract: nft-contract, proposal-id: proposal-id })
       (proposal (unwrap! (map-get? proposals key) ERR_NO_PROPOSAL))
     )
-    (asserts! (is-eq tx-sender contract-caller) ERR_NOT_DIRECT_CALL)
-    (asserts! (is-eq tx-sender (get artist registration)) ERR_NOT_ARTIST)
+    (asserts! (is-eq contract-caller (get artist registration)) ERR_NOT_ARTIST)
     (asserts! (is-eq (get status proposal) STATUS_PENDING) ERR_NOT_PENDING)
     (map-set proposals key (merge proposal { status: STATUS_REJECTED }))
     (print {
       a: "reject-proposal",
       nft-contract: nft-contract,
       proposal-id: proposal-id,
-      artist: tx-sender,
+      artist: contract-caller,
     })
     (ok true)
   )

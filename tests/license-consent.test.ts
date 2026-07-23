@@ -95,14 +95,68 @@ describe("set-artist", function () {
     expect(result).toBeErr(Cl.uint(103));
   });
 
-  it("rejects a contract principal as the artist wallet", function () {
+  it("accepts a contract principal as the artist (smart wallet / safe)", function () {
+    const safe = Cl.contractPrincipal(deployer, "mock-artist-safe");
     const { result } = simnet.callPublicFn(
       C,
       "set-artist",
-      [nftContract, nftContract, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      [nftContract, safe, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
       deployer
     );
-    expect(result).toBeErr(Cl.uint(104));
+    expect(result).toBeOk(Cl.bool(true));
+
+    const stored = simnet.callReadOnlyFn(C, "get-artist", [nftContract], deployer);
+    expect(cvToJSON(stored.result).value.value.artist.value).toBe(`${deployer}.mock-artist-safe`);
+  });
+});
+
+describe("contract artist (smart wallet) signing", function () {
+  const SAFE = "mock-artist-safe";
+  const safePrincipal = Cl.contractPrincipal(deployer, SAFE);
+
+  function registerSafe() {
+    return simnet.callPublicFn(
+      C,
+      "set-artist",
+      [nftContract, safePrincipal, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      deployer
+    );
+  }
+
+  it("the safe contract signs via contract-caller; signed-by is the safe", function () {
+    registerSafe();
+    proposeLicense();
+    // any EOA drives the safe; the safe is the immediate caller of the registry
+    const { result } = simnet.callPublicFn(
+      SAFE,
+      "sign-through",
+      [nftContract, Cl.uint(1), Cl.buffer(HASH_V1)],
+      requester
+    );
+    expect(result).toBeOk(Cl.uint(1));
+
+    const current = simnet.callReadOnlyFn(C, "get-current-license", [nftContract], deployer);
+    expect(cvToJSON(current.result).value.value["signed-by"].value).toBe(`${deployer}.${SAFE}`);
+  });
+
+  it("a direct EOA call cannot sign for a contract artist", function () {
+    registerSafe();
+    proposeLicense();
+    // artist EOA (not the safe) tries to sign directly -> contract-caller != artist
+    const { result } = signLicense(artist);
+    expect(result).toBeErr(Cl.uint(102));
+  });
+
+  it("the safe can reject too", function () {
+    registerSafe();
+    proposeLicense();
+    const { result } = simnet.callPublicFn(
+      SAFE,
+      "reject-through",
+      [nftContract, Cl.uint(1)],
+      requester
+    );
+    expect(result).toBeOk(Cl.bool(true));
   });
 });
 
@@ -155,6 +209,67 @@ describe("sync-artist-from-collection", function () {
     );
     const { result } = syncArtist();
     expect(result).toBeOk(Cl.principal(newArtist));
+  });
+
+  it("claim-artist: the on-chain artist self-registers with handle + evidence", function () {
+    // collection names the artist EOA on-chain
+    simnet.callPublicFn(
+      "mock-gamma-collection",
+      "set-artist-address",
+      [Cl.principal(artist)],
+      deployer
+    );
+    // that same EOA claims itself - no admin
+    const { result } = simnet.callPublicFn(
+      C,
+      "claim-artist",
+      [mockCollection, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE)],
+      artist
+    );
+    expect(result).toBeOk(Cl.principal(artist));
+
+    const stored = simnet.callReadOnlyFn(C, "get-artist", [mockCollection], deployer);
+    const json = cvToJSON(stored.result);
+    expect(json.value.value["x-handle"].value).toBe(X_HANDLE);
+    expect(json.value.value["evidence-uri"].value).toBe(EVIDENCE);
+  });
+
+  it("claim-artist: a non-artist EOA cannot claim", function () {
+    simnet.callPublicFn(
+      "mock-gamma-collection",
+      "set-artist-address",
+      [Cl.principal(artist)],
+      deployer
+    );
+    const { result } = simnet.callPublicFn(
+      C,
+      "claim-artist",
+      [mockCollection, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE)],
+      requester
+    );
+    expect(result).toBeErr(Cl.uint(102));
+  });
+
+  it("claim-artist: cannot overwrite an admin-locked registration", function () {
+    simnet.callPublicFn(
+      "mock-gamma-collection",
+      "set-artist-address",
+      [Cl.principal(artist)],
+      deployer
+    );
+    simnet.callPublicFn(
+      C,
+      "set-artist",
+      [mockCollection, Cl.principal(newArtist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(true)],
+      deployer
+    );
+    const { result } = simnet.callPublicFn(
+      C,
+      "claim-artist",
+      [mockCollection, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE)],
+      artist
+    );
+    expect(result).toBeErr(Cl.uint(110));
   });
 
   it("cannot overwrite an admin-locked registration", function () {

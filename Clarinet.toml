@@ -15,3 +15,9 @@ epoch = 'latest'
 path = "contracts/mocks/mock-gamma-collection.clar"
 clarity_version = 5
 epoch = 'latest'
+
+# test-only stand-in for a smart-wallet / safe artist that forwards a sign call
+[contracts.mock-artist-safe]
+path = "contracts/mocks/mock-artist-safe.clar"
+clarity_version = 5
+epoch = 'latest'
