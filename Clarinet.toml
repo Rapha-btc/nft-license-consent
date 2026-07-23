@@ -1,0 +1,11 @@
+[project]
+name = "nft-license-consent"
+description = "On-chain consent registry for NFT collection license changes"
+authors = []
+telemetry = false
+cache_dir = "./.cache"
+
+[contracts.license-consent]
+path = "contracts/license-consent.clar"
+clarity_version = 5
+epoch = 'latest'

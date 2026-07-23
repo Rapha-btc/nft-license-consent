@@ -1,0 +1,16 @@
+{
+  "name": "nft-license-consent",
+  "version": "1.0.0",
+  "description": "On-chain consent registry for NFT collection license changes.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@stacks/clarinet-sdk": "^3.21.0",
+    "@stacks/transactions": "^7.2.0",
+    "vitest": "^2.1.9",
+    "vitest-environment-clarinet": "^3.0.0"
+  }
+}
