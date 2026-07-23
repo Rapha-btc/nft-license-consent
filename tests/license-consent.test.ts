@@ -19,11 +19,19 @@ const EVIDENCE = "https://x.com/Mandarinemarie_/status/123";
 const LICENSE_URI = "ipfs://bafy-license-doc-v1";
 const LICENSE_NAME = "CC BY-NC 4.0";
 
-function registerArtist(wallet: string = artist) {
+const mockCollection = Cl.contractPrincipal(deployer, "mock-gamma-collection");
+
+function registerArtist(wallet: string = artist, lock = false) {
   return simnet.callPublicFn(
     C,
     "set-artist",
-    [nftContract, Cl.principal(wallet), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE)],
+    [
+      nftContract,
+      Cl.principal(wallet),
+      Cl.stringAscii(X_HANDLE),
+      Cl.stringAscii(EVIDENCE),
+      Cl.bool(lock),
+    ],
     deployer
   );
 }
@@ -71,7 +79,7 @@ describe("set-artist", function () {
     const { result } = simnet.callPublicFn(
       C,
       "set-artist",
-      [nftContract, Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE)],
+      [nftContract, Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
       requester
     );
     expect(result).toBeErr(Cl.uint(100));
@@ -81,7 +89,7 @@ describe("set-artist", function () {
     const { result } = simnet.callPublicFn(
       C,
       "set-artist",
-      [Cl.principal(requester), Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE)],
+      [Cl.principal(requester), Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
       deployer
     );
     expect(result).toBeErr(Cl.uint(103));
@@ -91,10 +99,85 @@ describe("set-artist", function () {
     const { result } = simnet.callPublicFn(
       C,
       "set-artist",
-      [nftContract, nftContract, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE)],
+      [nftContract, nftContract, Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
       deployer
     );
     expect(result).toBeErr(Cl.uint(104));
+  });
+});
+
+describe("sync-artist-from-collection", function () {
+  function syncArtist(sender: string = requester) {
+    return simnet.callPublicFn(C, "sync-artist-from-collection", [mockCollection], sender);
+  }
+
+  it("anyone registers the collection's on-chain artist-address", function () {
+    // point the mock collection at the artist wallet (deployer is initial)
+    simnet.callPublicFn(
+      "mock-gamma-collection",
+      "set-artist-address",
+      [Cl.principal(artist)],
+      deployer
+    );
+
+    const { result } = syncArtist();
+    expect(result).toBeOk(Cl.principal(artist));
+
+    const stored = simnet.callReadOnlyFn(C, "get-artist", [mockCollection], deployer);
+    const json = cvToJSON(stored.result);
+    expect(json.value.value.artist.value).toBe(artist);
+    expect(json.value.value["evidence-uri"].value).toBe("collection:get-artist-address");
+    expect(json.value.value.locked.value).toBe(false);
+
+    // the synced artist can sign proposals
+    simnet.callPublicFn(
+      C,
+      "propose-license",
+      [mockCollection, Cl.buffer(HASH_V1), Cl.stringAscii(LICENSE_URI), Cl.stringAscii(LICENSE_NAME)],
+      requester
+    );
+    const signed = simnet.callPublicFn(
+      C,
+      "sign-license",
+      [mockCollection, Cl.uint(1), Cl.buffer(HASH_V1)],
+      artist
+    );
+    expect(signed.result).toBeOk(Cl.uint(1));
+  });
+
+  it("re-sync follows an artist-address rotation on the collection", function () {
+    syncArtist();
+    simnet.callPublicFn(
+      "mock-gamma-collection",
+      "set-artist-address",
+      [Cl.principal(newArtist)],
+      deployer
+    );
+    const { result } = syncArtist();
+    expect(result).toBeOk(Cl.principal(newArtist));
+  });
+
+  it("cannot overwrite an admin-locked registration", function () {
+    simnet.callPublicFn(
+      C,
+      "set-artist",
+      [mockCollection, Cl.principal(artist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(true)],
+      deployer
+    );
+    const { result } = syncArtist();
+    expect(result).toBeErr(Cl.uint(110));
+  });
+
+  it("overwrites an unlocked admin registration (collection is authoritative)", function () {
+    simnet.callPublicFn(
+      C,
+      "set-artist",
+      [mockCollection, Cl.principal(newArtist), Cl.stringAscii(X_HANDLE), Cl.stringAscii(EVIDENCE), Cl.bool(false)],
+      deployer
+    );
+    const { result } = syncArtist();
+    // mock's artist-address is still its deployer here
+    expect(result).toBeOk(Cl.principal(deployer));
   });
 });
 

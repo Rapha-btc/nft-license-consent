@@ -9,3 +9,9 @@ cache_dir = "./.cache"
 path = "contracts/license-consent.clar"
 clarity_version = 5
 epoch = 'latest'
+
+# test-only mock of the Gamma collection template (bitcoin-pepe shape)
+[contracts.mock-gamma-collection]
+path = "contracts/mocks/mock-gamma-collection.clar"
+clarity_version = 5
+epoch = 'latest'

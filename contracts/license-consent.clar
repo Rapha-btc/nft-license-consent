@@ -7,11 +7,15 @@
 ;; - Signer: the verified artist wallet signs a specific pending proposal,
 ;;   re-asserting its hash. The signed doc is exactly the mandated doc.
 ;;
-;; Identity flow (off-chain): the artist's wallet is credibly linked to a
-;; public identity, e.g. an X post from their known handle naming the wallet
-;; (or a signed message). The registry admin verifies that evidence and
-;; registers the artist wallet for the collection, storing the handle and
-;; the evidence URI on-chain alongside it.
+;; Identity flow, two paths:
+;; a) Trustless (Gamma-style collections): the collection contract itself
+;;    exposes get-artist-address - anyone can sync-artist-from-collection
+;;    to register that wallet. The collection is the authority.
+;; b) Curated (everything else): the artist's wallet is credibly linked to
+;;    a public identity, e.g. an X post from their known handle naming the
+;;    wallet. The registry admin verifies that evidence and registers the
+;;    wallet with the handle and evidence URI stored on-chain. Admin can
+;;    lock a curated registration so a later sync cannot overwrite it.
 ;;
 ;; Each signature becomes a new immutable license version - a change of
 ;; license is simply the next signed version. Old versions stay readable.
@@ -32,6 +36,12 @@
 (define-constant ERR_NO_PROPOSAL (err u107))
 (define-constant ERR_NOT_PENDING (err u108))
 (define-constant ERR_HASH_MISMATCH (err u109))
+(define-constant ERR_LOCKED (err u110))
+
+;; Gamma-template collections expose the artist wallet on-chain
+(define-trait artist-source (
+  (get-artist-address () (response principal uint))
+))
 
 ;; nft collection contract -> verified artist wallet + identity evidence
 (define-map artists
@@ -41,6 +51,7 @@
     x-handle: (string-ascii 64),
     evidence-uri: (string-ascii 256),
     set-at: uint,
+    locked: bool,
   }
 )
 
@@ -87,11 +98,13 @@
 
 ;; Admin registers (or rotates) the verified artist wallet for a collection.
 ;; evidence-uri points at the public wallet<->identity proof (e.g. tweet URL).
+;; lock: true prevents sync-artist-from-collection from overwriting this.
 (define-public (set-artist
     (nft-contract principal)
     (artist principal)
     (x-handle (string-ascii 64))
     (evidence-uri (string-ascii 256))
+    (lock bool)
   )
   (begin
     (asserts! (is-eq contract-caller OWNER) ERR_NOT_OWNER)
@@ -102,6 +115,7 @@
       x-handle: x-handle,
       evidence-uri: evidence-uri,
       set-at: stacks-block-height,
+      locked: lock,
     })
     (print {
       a: "set-artist",
@@ -109,8 +123,38 @@
       artist: artist,
       x-handle: x-handle,
       evidence-uri: evidence-uri,
+      locked: lock,
     })
     (ok true)
+  )
+)
+
+;; Trustless registration for collections that expose the artist wallet
+;; on-chain (Gamma template: get-artist-address). Anyone can call; the
+;; collection contract is the authority. Cannot overwrite an admin-locked
+;; registration.
+(define-public (sync-artist-from-collection (collection <artist-source>))
+  (let (
+      (nft-contract (contract-of collection))
+      (artist (try! (contract-call? collection get-artist-address)))
+    )
+    (asserts! (not (default-to false (get locked (map-get? artists nft-contract))))
+      ERR_LOCKED
+    )
+    (asserts! (not (is-contract-principal artist)) ERR_ARTIST_NOT_STANDARD)
+    (map-set artists nft-contract {
+      artist: artist,
+      x-handle: "",
+      evidence-uri: "collection:get-artist-address",
+      set-at: stacks-block-height,
+      locked: false,
+    })
+    (print {
+      a: "sync-artist",
+      nft-contract: nft-contract,
+      artist: artist,
+    })
+    (ok artist)
   )
 )
 
